@@ -1,10 +1,12 @@
 using crudBlazor.BL.Services;
 using crudBlazor.Model.Entities;
 using crudBlazor.Model.Models;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace crudBlazor.ApiService.Controllers;
 
+[Authorize(Roles = "Admin,User")]
 [Route("api/[controller]")]
 [ApiController]
 public class ProductController(IProductService productService) : ControllerBase

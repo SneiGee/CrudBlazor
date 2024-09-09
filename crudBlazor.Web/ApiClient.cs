@@ -1,19 +1,43 @@
 using System.Net.Http.Headers;
+using crudBlazor.Model.Models;
+using crudBlazor.Web.Components.Authentication;
+using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage;
 using Newtonsoft.Json;
 
 namespace crudBlazor.Web;
 
-public class ApiClient(HttpClient httpClient, ProtectedLocalStorage localStorage)
+public class ApiClient(HttpClient httpClient, ProtectedLocalStorage localStorage, AuthenticationStateProvider authStateProvider)
 {
     public async Task SetAuthorizeHeader()
     {
-        var token = (await localStorage.GetAsync<string>("authToken")).Value;
-        if (token != null)
+        var sessionState = (await localStorage.GetAsync<LoginResponseModel>("sessionState")).Value;
+        if (sessionState != null && !string.IsNullOrEmpty(sessionState.Token))
         {
-            httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            if (sessionState.TokenExpired < DateTimeOffset.UtcNow.ToUnixTimeSeconds())
+            {
+                await ((CustomAuthStateProvider)authStateProvider).MarkUserAsLoggedOut();
+            }
+            else if (sessionState.TokenExpired < DateTimeOffset.UtcNow.AddMinutes(10).ToUnixTimeSeconds())
+            {
+                var res = await httpClient.GetFromJsonAsync<LoginResponseModel>($"/api/auth/loginByRefreshToken?refreshToken={sessionState.RefreshToken}");
+                if (res != null)
+                {
+                    await ((CustomAuthStateProvider)authStateProvider).MarkUserAsAuthenticated(res);
+                    httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", res!.Token);
+                }
+                else
+                {
+                    await ((CustomAuthStateProvider)authStateProvider).MarkUserAsLoggedOut();
+                }
+            }
+            else
+            {
+                httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", sessionState.Token);
+            }
         }
     }
+
     public async Task<T> GetFromJsonAsync<T>(string path)
     {
         await SetAuthorizeHeader();
@@ -26,7 +50,7 @@ public class ApiClient(HttpClient httpClient, ProtectedLocalStorage localStorage
         var res = await httpClient.PostAsJsonAsync(path, postModel);
         if (res != null && res.IsSuccessStatusCode)
         {
-            return JsonConvert.DeserializeObject<T1>(await res.Content.ReadAsStringAsync());
+            return JsonConvert.DeserializeObject<T1>(await res.Content.ReadAsStringAsync())!;
         }
         return default!;
     }
@@ -36,7 +60,7 @@ public class ApiClient(HttpClient httpClient, ProtectedLocalStorage localStorage
         var res = await httpClient.PutAsJsonAsync(path, postModel);
         if (res != null && res.IsSuccessStatusCode)
         {
-            return JsonConvert.DeserializeObject<T1>(await res.Content.ReadAsStringAsync());
+            return JsonConvert.DeserializeObject<T1>(await res.Content.ReadAsStringAsync())!;
         }
         return default!;
     }
